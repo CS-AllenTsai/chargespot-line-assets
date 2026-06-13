@@ -36,6 +36,19 @@ def build_areas(buttons):
         areas.append({"bounds":{"x":x,"y":y,"width":w,"height":h},"action":action})
     return areas
 
+import re as _re
+def fetch_image(url):
+    cands=[url]
+    alt=_re.sub(r'^http://[^/]+:8080/', 'http://127.0.0.1:8080/', url)
+    if alt!=url: cands.append(alt)
+    last=0
+    for u in cands:
+        for hdr in ({"xc-token": XC}, {}):
+            si, img = http("GET", u, hdr)
+            last=si
+            if si==200 and img: return 200, img
+    return last, b""
+
 def apply():
     token, cfg = get_settings()
     if not token: return {"ok":False,"error":"找不到 LINE token"}
@@ -49,8 +62,7 @@ def apply():
     s, body = http("POST","https://api.line.me/v2/bot/richmenu", H, json.dumps(rm).encode())
     if s != 200: return {"ok":False,"step":"建立選單","code":s,"resp":body.decode("utf-8","replace")}
     rmid = json.loads(body)["richMenuId"]
-    si, img = http("GET", image, {"xc-token": XC})
-    if si != 200 or not img: si, img = http("GET", image)
+    si, img = fetch_image(image)
     if si != 200: return {"ok":False,"step":"抓圖片","code":si}
     ctype = "image/png" if image.lower().split("?")[0].endswith(".png") else "image/jpeg"
     s, body = http("POST", "https://api-data.line.me/v2/bot/richmenu/%s/content"%rmid,
