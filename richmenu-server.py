@@ -66,6 +66,28 @@ def upload_to_github(name, content):
         return "https://raw.githubusercontent.com/CS-AllenTsai/chargespot-line-assets/main/"+path, None
     return None, "GitHub %d: %s" % (s, resp.decode("utf-8","replace")[:160])
 
+def clear_merchants():
+    MTAB = "http://127.0.0.1:8080/api/v3/data/p9zwkc6ert3qwko/mhip7dldp1g02d5"
+    def count():
+        st, b = http("GET", MTAB+"/count", {"xc-token": XC})
+        try: return json.loads(b).get("count", -1)
+        except: return -1
+    deleted = 0; rounds = 0
+    while rounds < 300:
+        c = count()
+        if c <= 0: break
+        st, b = http("GET", MTAB+"/records?fields=Id&pageSize=1000", {"xc-token": XC})
+        try: ids = [r["id"] for r in json.loads(b).get("records", [])]
+        except: ids = []
+        if not ids: break
+        for i in range(0, len(ids), 10):
+            chunk = json.dumps([{"id": x} for x in ids[i:i+10]]).encode()
+            for _ in range(4):
+                st, _b = http("DELETE", MTAB+"/records", {"xc-token": XC, "Content-Type": "application/json"}, chunk)
+                if st == 200: deleted += 10; break
+        rounds += 1
+    return {"ok": count() == 0, "deleted": deleted, "remaining": count()}
+
 def apply():
     token, cfg = get_settings()
     if not token: return {"ok":False,"error":"找不到 LINE token"}
@@ -110,7 +132,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b'{"status":"richmenu-apply ready"}')
     def do_POST(self):
         try:
-            if self.path.startswith("/upload"):
+            if self.path.startswith("/clear-merchants"):
+                result = clear_merchants()
+            elif self.path.startswith("/upload"):
                 n = int(self.headers.get("Content-Length","0"))
                 data = self.rfile.read(n) if n else b""
                 name = parse_qs(urlparse(self.path).query).get("name",["img.jpg"])[0]
