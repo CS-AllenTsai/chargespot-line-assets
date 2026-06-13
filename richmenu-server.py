@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import json, os, urllib.request, urllib.error
+import json, os, base64, uuid, urllib.request, urllib.error
+from urllib.parse import urlparse, parse_qs
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 NB_HOST = os.environ.get("NB_HOST", "127.0.0.1")
@@ -49,6 +50,22 @@ def fetch_image(url):
             if si==200 and img: return 200, img
     return last, b""
 
+def get_field(name):
+    s, body = http("GET", NB, {"xc-token": XC})
+    return json.loads(body)["records"][0]["fields"].get(name, "") or ""
+
+def upload_to_github(name, content):
+    ght = get_field("github_token")
+    if not ght: return None, "找不到 GitHub 權杖"
+    ext = ("." + name.rsplit(".",1)[-1].lower()) if "." in name else ".jpg"
+    path = "uploads/" + uuid.uuid4().hex[:12] + ext
+    body = json.dumps({"message":"crm upload","content":base64.b64encode(content).decode()}).encode()
+    s, resp = http("PUT", "https://api.github.com/repos/CS-AllenTsai/chargespot-line-assets/contents/"+path,
+        {"Authorization":"token "+ght,"Content-Type":"application/json","User-Agent":"chargespot-crm"}, body)
+    if s in (200,201):
+        return "https://raw.githubusercontent.com/CS-AllenTsai/chargespot-line-assets/main/"+path, None
+    return None, "GitHub %d: %s" % (s, resp.decode("utf-8","replace")[:160])
+
 def apply():
     token, cfg = get_settings()
     if not token: return {"ok":False,"error":"找不到 LINE token"}
@@ -92,7 +109,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type","application/json"); self.end_headers()
         self.wfile.write(b'{"status":"richmenu-apply ready"}')
     def do_POST(self):
-        try: result = apply()
+        try:
+            if self.path.startswith("/upload"):
+                n = int(self.headers.get("Content-Length","0"))
+                data = self.rfile.read(n) if n else b""
+                name = parse_qs(urlparse(self.path).query).get("name",["img.jpg"])[0]
+                url, err = upload_to_github(name, data)
+                result = {"ok":True,"url":url} if url else {"ok":False,"error":err}
+            else:
+                result = apply()
         except Exception as e: result = {"ok":False,"error":str(e)}
         body = json.dumps(result, ensure_ascii=False).encode()
         self.send_response(200 if result.get("ok") else 500); self._cors()
